@@ -56,11 +56,29 @@ SupportedLanguage = Literal["Tamil", "English", "Hindi", "Malayalam", "Telugu", 
 
 
 class DetectRequest(BaseModel):
-    audio_base64: str = Field(..., description="Base64 encoded MP3 audio")
+    # GUVI tester may send camelCase keys: audioBase64, audioFormat
+    # We support both by using aliases.
+    audio_base64: str = Field(
+        ..., alias="audioBase64", description="Base64 encoded MP3 audio"
+    )
     language: Optional[SupportedLanguage] = Field(
         default=None,
         description="Optional language hint: Tamil/English/Hindi/Malayalam/Telugu",
     )
+    audio_format: Optional[str] = Field(
+        default="mp3",
+        alias="audioFormat",
+        description="Audio format (expected: mp3)",
+    )
+    audio_base64_format: Optional[str] = Field(
+        default="base64",
+        alias="audioBase64Format",
+        description="Base64 format indicator (expected: base64)",
+    )
+
+    model_config = {
+        "populate_by_name": True
+    }
 
 
 class DetectResponse(BaseModel):

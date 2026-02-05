@@ -52,7 +52,7 @@ def _safe_decode_base64(b64_str: str) -> bytes:
     try:
         # Strip whitespace and hidden characters
         b64_str = b64_str.strip()
-        
+        print(f"DEBUG: Received Base64 start: {b64_str[:50]}")
         # Remove data URI prefix if present
         if "," in b64_str:
             b64_str = b64_str.split(",")[-1]
@@ -69,32 +69,49 @@ def _safe_decode_base64(b64_str: str) -> bytes:
 def _mp3_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
     try:
         if not audio_bytes or len(audio_bytes) < 100:
-            raise ValueError("Byte stream too small or empty")
+            raise ValueError(f"Byte stream too small: {len(audio_bytes)} bytes")
 
-        # TRY 1: Explicit MP3 loading (Fastest)
+        # MAGIC NUMBER CHECK: Inspect the first few bytes
+        header = audio_bytes[:4]
+        print(f"DEBUG: Byte Header (hex): {header.hex()}")
+
+        # Determine format manually to help FFmpeg
+        # RIFF = WAV, ID3/0xFFFB = MP3
+        fmt = None
+        if header.startswith(b'RIFF'):
+            fmt = "wav"
+        elif header.startswith(b'ID3') or header.startswith(b'\xff\xfb') or header.startswith(b'\xff\xf3'):
+            fmt = "mp3"
+        elif header.startswith(b'\x66\x74\x79\x70'): # ftyp
+            fmt = "m4a"
+
+        # Load with explicit format if found, otherwise auto-detect
         try:
-            audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
-        except:
-            # TRY 2: Fallback to auto-detect if MP3 fails
-            audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
-        
-        audio = audio.set_channels(1).set_frame_rate(TARGET_SR)
+            if fmt:
+                audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format=fmt)
+            else:
+                audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        except Exception as inner_e:
+            print(f"DEBUG: FFmpeg Error detail: {str(inner_e)}")
+            raise ValueError(f"FFmpeg couldn't read {fmt if fmt else 'unknown'} format.")
 
+        audio = audio.set_channels(1).set_frame_rate(TARGET_SR)
         max_ms = int(MAX_AUDIO_SECONDS * 1000)
-        if len(audio) > max_ms:
-            audio = audio[:max_ms]
+        audio = audio[:max_ms]
 
         samples = np.array(audio.get_array_of_samples()).astype(np.float32)
         
+        # Free memory immediately
         del audio
         gc.collect()
 
         peak = float(np.max(np.abs(samples)) + 1e-9)
         return samples / peak
+
     except Exception as e:
-        # EXTREMELY IMPORTANT: This log will show in Render "Logs"
         print(f"CRITICAL DECODE ERROR: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Audio decoding failed. The provided Base64 might not be a valid MP3/WAV file.")
+        # We return the actual error message to the tester so you can see it in the response
+        raise HTTPException(status_code=400, detail=f"Decoding Error: {str(e)}")
 
 def _simple_signal_features(x: np.ndarray) -> Dict[str, float]:
     n = len(x)
@@ -170,5 +187,6 @@ async def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=N
 
 @app.get("/")
 def health(): return {"status": "ok"}
+
 
 

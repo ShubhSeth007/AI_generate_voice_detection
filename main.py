@@ -50,21 +50,24 @@ def _require_api_key(x_api_key: Optional[str]) -> None:
 
 def _safe_decode_base64(b64_str: str) -> bytes:
     try:
-        # Strip whitespace and hidden characters
         b64_str = b64_str.strip()
-        print(f"DEBUG: Received Base64 start: {b64_str[:50]}")
-        # Remove data URI prefix if present
+        
+        # SAFETY VALVE: Catch the "base64" placeholder string from the tester
+        if b64_str.lower() == "base64" or len(b64_str) < 10:
+             print("DEBUG: Placeholder string detected instead of real data.")
+             # Return a tiny silent MP3 header or raise a clear error
+             raise ValueError("Please provide a real Base64 audio string, not the word 'base64'.")
+
         if "," in b64_str:
             b64_str = b64_str.split(",")[-1]
         
-        # Add missing padding
         missing_padding = len(b64_str) % 4
         if missing_padding:
             b64_str += "=" * (4 - missing_padding)
             
         return base64.b64decode(b64_str)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid base64 format")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 def _mp3_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
     try:
@@ -190,6 +193,7 @@ async def detect(request: Request, x_api_key: Optional[str] = Header(default=Non
 
 @app.get("/")
 def health(): return {"status": "ok"}
+
 
 
 

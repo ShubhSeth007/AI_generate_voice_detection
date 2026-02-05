@@ -2,7 +2,7 @@ import os
 import io
 import base64
 import math
-import gc  # Added for manual memory management
+import gc 
 from typing import Optional, Literal, Dict
 
 import numpy as np
@@ -15,10 +15,9 @@ from pydantic import BaseModel, Field
 from pydub import AudioSegment
 
 # -----------------------------
-# Config - Tightened for 512MB RAM
+# Config - Optimized for 512MB RAM
 # -----------------------------
 API_KEY_ENV = "API_KEY"
-# Lowered default slightly to prevent OOM; judges usually test 5-10s clips
 MAX_AUDIO_SECONDS = float(os.getenv("MAX_AUDIO_SECONDS", "10")) 
 TARGET_SR = 16000
 
@@ -32,7 +31,7 @@ SupportedLanguage = Literal["Tamil", "English", "Hindi", "Malayalam", "Telugu", 
 class DetectRequest(BaseModel):
     audio_url: Optional[str] = Field(default=None, alias="audioUrl")
     audio_base64: Optional[str] = Field(default=None, alias="audioBase64")
-    language: Optional[SupportedLanguage] = Field(default=None)
+    language: Optional[SupportedLanguage] = Field(default="Unknown")
     model_config = {"populate_by_name": True}
 
 class DetectResponse(BaseModel):
@@ -49,47 +48,53 @@ def _require_api_key(x_api_key: Optional[str]) -> None:
     if not x_api_key or x_api_key != expected:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
+def _safe_decode_base64(b64_str: str) -> bytes:
+    """Robust decoder to handle data prefixes and missing padding."""
+    try:
+        # Remove data URI prefix if present (e.g., data:audio/mp3;base64,)
+        if "," in b64_str:
+            b64_str = b64_str.split(",")[-1]
+        
+        # Add missing padding
+        missing_padding = len(b64_str) % 4
+        if missing_padding:
+            b64_str += "=" * (4 - missing_padding)
+            
+        return base64.b64decode(b64_str)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 format")
+
 def _mp3_bytes_to_float32(mp3_bytes: bytes) -> np.ndarray:
     try:
-        # Load audio and immediately reduce to mono/16k to save RAM
         audio = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
         audio = audio.set_channels(1).set_frame_rate(TARGET_SR)
 
-        # Trim aggressively for stability on limited RAM
         max_ms = int(MAX_AUDIO_SECONDS * 1000)
         if len(audio) > max_ms:
             audio = audio[:max_ms]
 
         samples = np.array(audio.get_array_of_samples()).astype(np.float32)
         
-        # Free memory from AudioSegment immediately
         del audio
         gc.collect()
 
-        # Normalize [-1, 1]
         peak = float(np.max(np.abs(samples)) + 1e-9)
         return samples / peak
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Audio decoding failed: {str(e)}")
 
 def _simple_signal_features(x: np.ndarray) -> Dict[str, float]:
-    # Analysis using smaller chunks to prevent large FFT memory spikes
     n = len(x)
-    if n < 320: return {"hf_ratio": 0.0, "zcr": 0.0, "energy_var": 0.0}
+    if n < 320: return {"hf_ratio": 0.0, "zcr": 0.0}
 
-    # High-frequency analysis using smaller rfft
     X = np.fft.rfft(x)
     mag = np.abs(X) + 1e-9
     freqs = np.fft.rfftfreq(n, d=1.0 / TARGET_SR)
 
-    # HF = High Frequency (Artifacts often found > 6kHz in AI)
     hf = mag[freqs >= 6000].sum()
     hf_ratio = float(hf / (mag.sum() + 1e-9))
-
-    # Zero Crossing Rate
     zcr = float(np.mean(np.abs(np.diff(np.sign(x))) > 0))
 
-    # Clean up FFT objects before moving to prediction
     del X, mag, freqs
     gc.collect()
 
@@ -99,8 +104,6 @@ def _predict_probability_ai(feats: Dict[str, float]) -> float:
     hf = feats["hf_ratio"]
     zcr = feats["zcr"]
     
-    # Heuristic scoring: AI voices often lack natural jitter (low ZCR)
-    # and contain spectral "ringing" (high HF ratio)
     score = 0.0
     score += np.clip((hf - 0.20) * 4.0, -1.5, 1.5)
     score += np.clip((0.06 - zcr) * 3.5, -1.5, 1.5)
@@ -126,10 +129,7 @@ async def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=N
         except:
             raise HTTPException(status_code=400, detail="Failed to download audioUrl")
     else:
-        try:
-            mp3_bytes = base64.b64decode(req.audio_base64)
-        except:
-            raise HTTPException(status_code=400, detail="Invalid base64")
+        mp3_bytes = _safe_decode_base64(req.audio_base64)
 
     # Process and Detect
     samples = _mp3_bytes_to_float32(mp3_bytes)
@@ -139,7 +139,7 @@ async def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=N
     classification = "AI_GENERATED" if p_ai >= 0.5 else "HUMAN"
     confidence = 0.5 + abs(p_ai - 0.5)
 
-    # Cleanup before returning response
+    # Cleanup
     del samples, mp3_bytes
     gc.collect()
 

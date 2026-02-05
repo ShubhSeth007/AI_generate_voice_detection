@@ -56,29 +56,28 @@ SupportedLanguage = Literal["Tamil", "English", "Hindi", "Malayalam", "Telugu", 
 
 
 class DetectRequest(BaseModel):
-    # GUVI tester may send camelCase keys: audioBase64, audioFormat
-    # We support both by using aliases.
-    audio_base64: str = Field(
-        ..., alias="audioBase64", description="Base64 encoded MP3 audio"
-    )
+    # GUVI tester sends camelCase keys
+    audio_base64: str = Field(..., alias="audioBase64", description="Base64 encoded MP3 audio")
+
     language: Optional[SupportedLanguage] = Field(
         default=None,
         description="Optional language hint: Tamil/English/Hindi/Malayalam/Telugu",
     )
+
     audio_format: Optional[str] = Field(
         default="mp3",
         alias="audioFormat",
         description="Audio format (expected: mp3)",
     )
+
     audio_base64_format: Optional[str] = Field(
         default="base64",
         alias="audioBase64Format",
         description="Base64 format indicator (expected: base64)",
     )
 
-    model_config = {
-        "populate_by_name": True
-    }
+    model_config = {"populate_by_name": True}
+
 
 
 class DetectResponse(BaseModel):
@@ -347,7 +346,7 @@ def root():
 
 
 @app.post("/v1/detect", response_model=DetectResponse)
-def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")):
+def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=None, alias="x-api-key")):
     _require_api_key(x_api_key)
 
     _load_models()
@@ -395,3 +394,4 @@ def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=None, a
         language_detected=language_detected,
         reasoning=reasoning,
     )
+

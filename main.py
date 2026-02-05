@@ -145,23 +145,35 @@ def _predict_probability_ai(feats: Dict[str, float]) -> float:
 # Main Endpoint
 # -----------------------------
 @app.post("/v1/detect", response_model=DetectResponse)
-async def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=None, alias="x-api-key")):
+async def detect(request: Request, x_api_key: Optional[str] = Header(default=None, alias="x-api-key")):
+    # 1. Manual Auth Check
     _require_api_key(x_api_key)
 
-    if not req.audio_url and not req.audio_base64:
-        raise HTTPException(status_code=422, detail="Provide audioUrl or audioBase64")
+    # 2. Get the raw JSON body to see what the tester is REALLY sending
+    body = await request.json()
+    print(f"DEBUG: Full Request Body Keys: {list(body.keys())}")
 
-    # Download or Decode
-    if req.audio_url:
+    # 3. Greedy Extraction (Checks every possible variation of the key)
+    audio_url = body.get("audioUrl") or body.get("audio_url")
+    audio_b64 = body.get("audioBase64") or body.get("audio_base64") or body.get("audio")
+    lang = body.get("language") or "Unknown"
+
+    if not audio_url and not audio_b64:
+        raise HTTPException(status_code=422, detail=f"No audio found. Keys received: {list(body.keys())}")
+
+    # 4. Process
+    if audio_url:
         try:
-            r = requests.get(req.audio_url, timeout=10)
-            mp3_bytes = r.content
+            mp3_bytes = requests.get(audio_url, timeout=10).content
         except:
-            raise HTTPException(status_code=400, detail="Failed to download audioUrl")
+            raise HTTPException(status_code=400, detail="Failed to download from audioUrl")
     else:
-        mp3_bytes = _safe_decode_base64(req.audio_base64)
+        # Use our safe decoder
+        mp3_bytes = _safe_decode_base64(audio_b64)
 
-    # Process and Detect
+    print(f"DEBUG: Final byte count for decoding: {len(mp3_bytes)}")
+
+    # 5. Decode and Analyze
     samples = _mp3_bytes_to_float32(mp3_bytes)
     feats = _simple_signal_features(samples)
     p_ai = _predict_probability_ai(feats)
@@ -169,24 +181,16 @@ async def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=N
     classification = "AI_GENERATED" if p_ai >= 0.5 else "HUMAN"
     confidence = 0.5 + abs(p_ai - 0.5)
 
-    # Cleanup
-    del samples, mp3_bytes
-    gc.collect()
-
-    reasoning = (
-        f"Acoustic analysis indicates {'synthetic' if p_ai >= 0.5 else 'natural'} spectral "
-        f"balance (HF ratio: {feats['hf_ratio']:.3f}, ZCR: {feats['zcr']:.3f})."
-    )
-
     return DetectResponse(
         classification=classification,
         confidence_score=float(confidence),
-        language_detected=req.language or "Unknown",
-        reasoning=reasoning
+        language_detected=lang,
+        reasoning=f"Analysis complete. Score: {p_ai:.2f}"
     )
 
 @app.get("/")
 def health(): return {"status": "ok"}
+
 
 
 

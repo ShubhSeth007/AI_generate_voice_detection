@@ -68,12 +68,15 @@ def _safe_decode_base64(b64_str: str) -> bytes:
 
 def _mp3_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
     try:
-        # Check if we actually have data
-        if len(audio_bytes) == 0:
-            raise ValueError("Byte stream is empty")
+        if not audio_bytes or len(audio_bytes) < 100:
+            raise ValueError("Byte stream too small or empty")
 
-        # REMOVED format="mp3" -> pydub/ffmpeg will now auto-detect (WAV, MP3, AAC)
-        audio = AudioSegment.from_file(io.BytesIO(audio_bytes)) 
+        # TRY 1: Explicit MP3 loading (Fastest)
+        try:
+            audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+        except:
+            # TRY 2: Fallback to auto-detect if MP3 fails
+            audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
         
         audio = audio.set_channels(1).set_frame_rate(TARGET_SR)
 
@@ -89,8 +92,9 @@ def _mp3_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
         peak = float(np.max(np.abs(samples)) + 1e-9)
         return samples / peak
     except Exception as e:
-        # This will now show the actual FFmpeg error in the response for debugging
-        raise HTTPException(status_code=400, detail=f"Audio decoding failed. Ensure file is a valid audio format. Error: {str(e)[:100]}")
+        # EXTREMELY IMPORTANT: This log will show in Render "Logs"
+        print(f"CRITICAL DECODE ERROR: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Audio decoding failed. The provided Base64 might not be a valid MP3/WAV file.")
 
 def _simple_signal_features(x: np.ndarray) -> Dict[str, float]:
     n = len(x)
@@ -166,4 +170,5 @@ async def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=N
 
 @app.get("/")
 def health(): return {"status": "ok"}
+
 

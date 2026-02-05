@@ -49,9 +49,11 @@ def _require_api_key(x_api_key: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 def _safe_decode_base64(b64_str: str) -> bytes:
-    """Robust decoder to handle data prefixes and missing padding."""
     try:
-        # Remove data URI prefix if present (e.g., data:audio/mp3;base64,)
+        # Strip whitespace and hidden characters
+        b64_str = b64_str.strip()
+        
+        # Remove data URI prefix if present
         if "," in b64_str:
             b64_str = b64_str.split(",")[-1]
         
@@ -64,9 +66,15 @@ def _safe_decode_base64(b64_str: str) -> bytes:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid base64 format")
 
-def _mp3_bytes_to_float32(mp3_bytes: bytes) -> np.ndarray:
+def _mp3_bytes_to_float32(audio_bytes: bytes) -> np.ndarray:
     try:
-        audio = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
+        # Check if we actually have data
+        if len(audio_bytes) == 0:
+            raise ValueError("Byte stream is empty")
+
+        # REMOVED format="mp3" -> pydub/ffmpeg will now auto-detect (WAV, MP3, AAC)
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes)) 
+        
         audio = audio.set_channels(1).set_frame_rate(TARGET_SR)
 
         max_ms = int(MAX_AUDIO_SECONDS * 1000)
@@ -81,7 +89,8 @@ def _mp3_bytes_to_float32(mp3_bytes: bytes) -> np.ndarray:
         peak = float(np.max(np.abs(samples)) + 1e-9)
         return samples / peak
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Audio decoding failed: {str(e)}")
+        # This will now show the actual FFmpeg error in the response for debugging
+        raise HTTPException(status_code=400, detail=f"Audio decoding failed. Ensure file is a valid audio format. Error: {str(e)[:100]}")
 
 def _simple_signal_features(x: np.ndarray) -> Dict[str, float]:
     n = len(x)
@@ -157,3 +166,4 @@ async def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=N
 
 @app.get("/")
 def health(): return {"status": "ok"}
+

@@ -1,9 +1,6 @@
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
-pydantic==2.6.4
-
-numpy==1.26.4
-requests==2.31.0
-
-pydub==0.25.1
-ffmpeg-python==0.2.0
+fastapi
+uvicorn
+pydub
+numpy
+requests
+python-multipart

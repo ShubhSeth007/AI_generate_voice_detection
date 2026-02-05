@@ -22,7 +22,7 @@ from pydub import AudioSegment
 # ML
 import torch
 import torch.nn as nn
-from transformers import AutoProcessor, AutoModel
+from transformers import AutoModel, AutoFeatureExtractor
 
 
 # -----------------------------
@@ -253,7 +253,7 @@ def _load_models() -> None:
         return
 
     # Load embedding model
-    processor = AutoProcessor.from_pretrained(DEFAULT_MODEL_NAME)
+    processor = AutoFeatureExtractor.from_pretrained(DEFAULT_MODEL_NAME)
     embed_model = AutoModel.from_pretrained(DEFAULT_MODEL_NAME)
     embed_model.to(DEVICE)
     embed_model.eval()
@@ -394,4 +394,5 @@ def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=None, a
         language_detected=language_detected,
         reasoning=reasoning,
     )
+
 

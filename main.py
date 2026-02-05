@@ -29,7 +29,7 @@ from transformers import AutoModel, AutoFeatureExtractor
 # Config
 # -----------------------------
 API_KEY_ENV = "API_KEY"  # set this in Render Environment Variables
-DEFAULT_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "microsoft/wavlm-base")
+DEFAULT_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "facebook/wav2vec2-base-960h")
 
 # We keep max audio length bounded for stability on free-tier.
 MAX_AUDIO_SECONDS = float(os.getenv("MAX_AUDIO_SECONDS", "20"))
@@ -394,5 +394,6 @@ def detect(req: DetectRequest, x_api_key: Optional[str] = Header(default=None, a
         language_detected=language_detected,
         reasoning=reasoning,
     )
+
 
 
